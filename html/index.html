@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Camera App</title>
+</head>
+
+<body>
+    <div>
+        <video id="videoElement"></video>
+        <button id="activateCameraButton">Activate</button>
+        <button id="captureButton">Capture</button>
+        <canvas id="canvasElement"></canvas>
+    </div>
+
+    <!-- import ONNXRuntime Web from CDN -->
+    <!-- Documentation : https://github.com/microsoft/onnxruntime-inference-examples/blob/main/js/quick-start_onnxruntime-web-script-tag/index.html -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+
+    <script>
+        // Create a fuction to convert the image to a tensor
+        async function imageToTensor(image) {
+            // Assuming 'image' is the HTMLImageElement for the image you want to convert
+            const canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(image, 0, 0, 64, 64);
+            const imageData = ctx.getImageData(0, 0, 64, 64);
+
+            // Convert the image data to a tensor
+            const tensorData = new Float32Array(256 * 64 * 64);
+            for (let i = 0; i < 64 * 64; i++) {
+                const pixel = imageData.data.subarray(i * 4, (i + 1) * 4); // Assuming RGBA format
+                tensorData[i * 256] = pixel[0] / 255; // Normalize pixel values to [0, 1]
+                tensorData[i * 256 + 1] = pixel[1] / 255;
+                tensorData[i * 256 + 2] = pixel[2] / 255;
+                // If the image is grayscale, you can use pixel[0] for all three channels
+            }
+            return new ort.Tensor('float32', tensorData, [256, 64, 64]);
+        }
+
+        // Create a function to run the model
+        async function runONNXModel(image) {
+            // Load the ONNX model
+            const modelPath = './onnx/mobile_sam.onnx';
+            const session = await ort.InferenceSession.create(modelPath);
+            console.log("Model loaded OK");
+
+            // Create the input tensors
+            const image_embeddings = imageToTensor(image);
+            console.log(image_embeddings)
+            // Only 1 point
+            const point_coords = new ort.Tensor('float32', [15,15], [1, 2]);
+            console.log(point_coords)
+            const point_labels = new ort.Tensor('float32', [1], [1]);
+            console.log(point_labels)
+            const mask_input = new ort.Tensor('float32', new Float32Array(1 * 1* 256 * 256), [1, 256, 256]);
+            console.log(mask_input)
+            const has_mask_input = new ort.Tensor('float32', [0], [1]);
+            console.log(has_mask_input)
+            const orig_im_size = new ort.Tensor('float32', [image.width, image.height], [2]);
+            console.log(orig_im_size)
+
+            const inputs = {
+                image_embeddings: image_embeddings,
+                point_coords: point_coords,
+                point_labels: point_labels,
+                mask_input: mask_input,
+                has_mask_input: has_mask_input,
+                orig_im_size: orig_im_size
+            };
+            
+            console.log("Tensors creation OK");
+
+            const outputs = await session.run( inputs );
+
+            console.log("Model successfully executed");
+            console.log(outputs);
+            // Do something with the output data
+        }
+
+        // Get video and canvas elements
+        const video = document.getElementById('videoElement');
+        const activateCameraButton = document.getElementById('activateCameraButton');
+        const captureButton = document.getElementById('captureButton');
+        const canvas = document.getElementById('canvasElement');
+
+        // Activate the camera stream
+        activateCameraButton.addEventListener('click', () => {
+            if (activateCameraButton.textContent === 'Deactivate') {
+                video.pause();
+                activateCameraButton.textContent = 'Activate';
+            }
+            else {
+                video.play();
+                activateCameraButton.textContent = 'Deactivate';
+            }
+        });
+
+        // Access the camera
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then((stream) => {
+                video.srcObject = stream;
+            })
+            .catch((error) => {
+                console.error('Error accessing camera:', error);
+            });
+
+        // Capture button click event
+        captureButton.addEventListener('click', () => {
+            // Draw the video frame on the canvas
+            canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+            // Create a HTLMImageElement from the canvas
+            const image = new Image();
+            image.src = canvas.toDataURL();
+            // Run the model onto the canvas
+            runONNXModel(image);
+        });
+
+
+    </script>
+</body>
+
+</html>
